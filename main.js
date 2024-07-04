@@ -1,3 +1,8 @@
+import * as THREE from './node_modules/three';
+import { OrbitControls } from './node_modules/three/examples/jsm/controls/OrbitControls.js';
+import { OBJExporter } from './node_modules/three/examples/jsm/exporters/OBJExporter.js';
+import { saveAs } from './node_modules/file-saver';
+
 let scene, camera, renderer, controls;
 
 init();
@@ -5,7 +10,6 @@ loadData();
 
 function init() {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xa0a0a0);
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(0, 3, 10);
@@ -18,12 +22,13 @@ function init() {
     light.position.set(0, 10, 10).normalize();
     scene.add(light);
 
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.25;
     controls.enableZoom = true;
 
     window.addEventListener('resize', onWindowResize, false);
+    document.getElementById('exportButton').addEventListener('click', exportToOBJ);
     animate();
 }
 
@@ -31,79 +36,47 @@ function loadData() {
     fetch('data/a.json')
         .then(response => response.json())
         .then(data => {
-            console.log('Loaded data:', data); // Добавлено для отладки
-            buildWalls(data.walls);
-            buildDoors(data.doors);
-            buildWindows(data.windows);
+            buildObjects(data.embeds);
         })
-        .catch(error => console.error('Error loading data:', error));
+        .catch(error => {
+            console.error('Error loading data:', error);
+        });
 }
 
-function buildWalls(walls) {
-    const defaultWallHeight = 3;  // Высота по умолчанию
-    const wallMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+function buildObjects(embeds) {
+    embeds.forEach(embed => {
+        const { x, y, zLayer, rect } = embed;
+        const { vertices, faces } = rect.data;
 
-    walls.forEach(wall => {
-        const length = parseFloat(wall.lengthFormatted.replace('m', ''));
-        const height = wall.height !== null ? wall.height : defaultWallHeight;
-        const thickness = wall.thickness !== null ? wall.thickness / 100 : 0.1;
+        const geometry = new THREE.BufferGeometry();
+        const verticesArray = [];
+        const indicesArray = [];
 
-        if (isNaN(length) || isNaN(height) || isNaN(thickness)) {
-            console.error('Invalid wall dimensions:', wall);
-            return;
+        for (let i = 0; i < vertices.length; i += 3) {
+            verticesArray.push(vertices[i] + x, vertices[i + 1] + y, vertices[i + 2] + zLayer);
         }
 
-        const geometry = new THREE.BoxGeometry(length, height, thickness);
+        for (let i = 0; i < faces.length; i += 4) {
+            indicesArray.push(faces[i], faces[i + 1], faces[i + 2]);
+            indicesArray.push(faces[i], faces[i + 2], faces[i + 3]);
+        }
 
-        const mesh = new THREE.Mesh(geometry, wallMaterial);
-        mesh.position.set(wall.x, height / 2, wall.y);
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(verticesArray, 3));
+        geometry.setIndex(indicesArray);
+
+        const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+        const mesh = new THREE.Mesh(geometry, material);
+        
         scene.add(mesh);
-        console.log('Added wall mesh:', mesh); // Отладка мешей
     });
 }
 
-function buildDoors(doors) {
-    const doorHeight = 2.1;
-    const doorWidth = 0.9;
-    const doorMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+function exportToOBJ() {
+    const exporter = new OBJExporter();
+    const result = exporter.parse(scene);
 
-    doors.forEach(door => {
-        const thickness = door.thickness !== null ? door.thickness / 100 : 0.1;
-
-        if (isNaN(door.x) || isNaN(door.y) || isNaN(thickness)) {
-            console.error('Invalid door dimensions:', door);
-            return;
-        }
-
-        const geometry = new THREE.BoxGeometry(doorWidth, doorHeight, thickness);
-
-        const mesh = new THREE.Mesh(geometry, doorMaterial);
-        mesh.position.set(door.x, doorHeight / 2, door.y);
-        scene.add(mesh);
-        console.log('Added door mesh:', mesh); // Отладка мешей
-    });
-}
-
-function buildWindows(windows) {
-    const windowHeight = 1.5;
-    const windowWidth = 1;
-    const windowMaterial = new THREE.MeshBasicMaterial({ color: 0x0000ff });
-
-    windows.forEach(window => {
-        const thickness = window.thickness !== null ? window.thickness / 100 : 0.1;
-
-        if (isNaN(window.x) || isNaN(window.y) || isNaN(thickness)) {
-            console.error('Invalid window dimensions:', window);
-            return;
-        }
-
-        const geometry = new THREE.BoxGeometry(windowWidth, windowHeight, thickness);
-
-        const mesh = new THREE.Mesh(geometry, windowMaterial);
-        mesh.position.set(window.x, windowHeight / 2, window.y);
-        scene.add(mesh);
-        console.log('Added window mesh:', mesh); // Отладка мешей
-    });
+    const blob = new Blob([result], { type: 'text/plain' });
+    saveAs(blob, 'model.obj');
 }
 
 function animate() {
